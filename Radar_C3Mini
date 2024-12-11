@@ -1,0 +1,178 @@
+#if defined(ESP32)
+  #ifdef ESP_IDF_VERSION_MAJOR // IDF 4+
+    #if CONFIG_IDF_TARGET_ESP32 // ESP32/PICO-D4
+      #define MONITOR_SERIAL Serial
+      #define RADAR_SERIAL Serial1
+      #define RADAR_RX_PIN 32
+      #define RADAR_TX_PIN 33
+    #elif CONFIG_IDF_TARGET_ESP32S2
+      #define MONITOR_SERIAL Serial
+      #define RADAR_SERIAL Serial1
+      #define RADAR_RX_PIN 9
+      #define RADAR_TX_PIN 8
+    #elif CONFIG_IDF_TARGET_ESP32C3
+      #define MONITOR_SERIAL Serial
+      #define RADAR_SERIAL Serial1
+      #define RADAR_RX_PIN 4
+      #define RADAR_TX_PIN 5
+    #else 
+      #error Target CONFIG_IDF_TARGET is not supported
+    #endif
+  #else // ESP32 Before IDF 4.0
+    #define MONITOR_SERIAL Serial
+    #define RADAR_SERIAL Serial1
+    #define RADAR_RX_PIN 32
+    #define RADAR_TX_PIN 33
+  #endif
+#elif defined(_AVR_ATmega32U4_)
+  #define MONITOR_SERIAL Serial
+  #define RADAR_SERIAL Serial1
+  #define RADAR_RX_PIN 0
+  #define RADAR_TX_PIN 1
+#endif
+
+#include <WiFi.h>
+#include <WiFiManager.h>  // WiFiManager for WiFi configuration
+#include "Adafruit_MQTT.h"
+#include "Adafruit_MQTT_Client.h"
+#include <ld2410.h>
+
+// Default WiFi credentials
+#define WLAN_SSID       " "
+#define WLAN_PASS       " "
+
+// Default Adafruit IO credentials (will be overwritten via config portal)
+char AIO_USERNAME[40] = " ";
+char AIO_KEY[40] = " ";
+
+// MQTT Server setup
+WiFiClient client;
+Adafruit_MQTT_Client mqtt(&client, "io.adafruit.com", 1883, AIO_USERNAME, AIO_KEY);
+
+
+// Feeds
+Adafruit_MQTT_Publish stationaryTargetFeed(&mqtt, (String(AIO_USERNAME) + "/feeds/stationaryTarget").c_str());
+Adafruit_MQTT_Publish movingTargetFeed(&mqtt, (String(AIO_USERNAME) + "/feeds/movingTarget").c_str());
+Adafruit_MQTT_Publish presenceFeed(&mqtt, (String(AIO_USERNAME) + "/feeds/presence").c_str());
+Adafruit_MQTT_Publish distanceFeed(&mqtt, (String(AIO_USERNAME) + "/feeds/distance").c_str());
+
+
+ld2410 radar;
+uint32_t lastReading = 0;
+bool radarConnected = false;
+
+// Create a WiFiManager parameter for the username and API key
+WiFiManagerParameter custom_username("username", "Adafruit IO Username", AIO_USERNAME, 40);
+WiFiManagerParameter custom_apikey("apikey", "Adafruit IO Key", AIO_KEY, 40);
+
+void setup(void)
+{
+  MONITOR_SERIAL.begin(115200);
+
+  // Initialize WiFi Manager and start configuration portal
+  WiFiManager wifiManager;
+  wifiManager.addParameter(&custom_username);  // Add username parameter
+  wifiManager.addParameter(&custom_apikey);    // Add API key parameter
+
+  if (!wifiManager.autoConnect("Radar_Config")) {
+    MONITOR_SERIAL.println("Failed to connect, starting AP mode...");
+  }
+
+  MONITOR_SERIAL.println("Connected to WiFi!");
+  MONITOR_SERIAL.print("IP Address: ");
+  MONITOR_SERIAL.println(WiFi.localIP());
+
+  // Set the new username and API key from the WiFiManager parameters
+  strncpy(AIO_USERNAME, custom_username.getValue(), sizeof(AIO_USERNAME));
+  strncpy(AIO_KEY, custom_apikey.getValue(), sizeof(AIO_KEY));
+
+  // Start Radar
+  #if defined(ESP32)
+    RADAR_SERIAL.begin(256000, SERIAL_8N1, RADAR_RX_PIN, RADAR_TX_PIN);
+  #elif defined(_AVR_ATmega32U4_)
+    RADAR_SERIAL.begin(256000);
+  #endif
+
+  delay(500);
+  MONITOR_SERIAL.print(F("\nConnect LD2410 radar TX to GPIO:"));
+  MONITOR_SERIAL.println(RADAR_RX_PIN);
+  MONITOR_SERIAL.print(F("Connect LD2410 radar RX to GPIO:"));
+  MONITOR_SERIAL.println(RADAR_TX_PIN);
+  MONITOR_SERIAL.print(F("LD2410 radar sensor initialising: "));
+  if (radar.begin(RADAR_SERIAL)) {
+    MONITOR_SERIAL.println(F("OK"));
+    MONITOR_SERIAL.print(F("LD2410 firmware version: "));
+    MONITOR_SERIAL.print(radar.firmware_major_version);
+    MONITOR_SERIAL.print('.');
+    MONITOR_SERIAL.print(radar.firmware_minor_version);
+    MONITOR_SERIAL.print('.');
+    MONITOR_SERIAL.println(radar.firmware_bugfix_version, HEX);
+  } else {
+    MONITOR_SERIAL.println(F("not connected"));
+  }
+
+  // Connect to MQTT
+  if (!mqtt.connected()) {
+    reconnectMQTT();
+  }
+}
+
+void loop()
+{
+  radar.read();
+  if (radar.isConnected() && millis() - lastReading > 1000)  // Report every 1000ms
+  {
+    lastReading = millis();
+    int presence = radar.presenceDetected() ? 1 : 0;
+    int stationaryDistance = radar.stationaryTargetDetected() ? radar.stationaryTargetDistance() : 0;
+    int movingDistance = radar.movingTargetDetected() ? radar.movingTargetDistance() : 0;
+    int overallDistance = radar.movingTargetDetected() ? radar.movingTargetDistance() : radar.stationaryTargetDistance();
+    
+    // Publish feeds
+    if (!presenceFeed.publish(String(presence).c_str())) {
+      MONITOR_SERIAL.println(F("Failed to publish presence"));
+    }
+    if (!stationaryTargetFeed.publish(String(stationaryDistance).c_str())) {
+      MONITOR_SERIAL.println(F("Failed to publish stationary target distance"));
+    }
+    if (!movingTargetFeed.publish(String(movingDistance).c_str())) {
+      MONITOR_SERIAL.println(F("Failed to publish moving target distance"));
+    }
+    if (!distanceFeed.publish(String(overallDistance).c_str())) {
+      MONITOR_SERIAL.println(F("Failed to publish overall distance"));
+    }
+
+    // Log data to Serial Monitor
+    MONITOR_SERIAL.print(F("Presence: ")); MONITOR_SERIAL.println(presence);
+    if (presence) {
+      if (radar.stationaryTargetDetected()) {
+        MONITOR_SERIAL.print(F("Stationary target: "));
+        MONITOR_SERIAL.print(stationaryDistance);
+        MONITOR_SERIAL.println(F(" cm"));
+      }
+      if (radar.movingTargetDetected()) {
+        MONITOR_SERIAL.print(F("Moving target: "));
+        MONITOR_SERIAL.print(movingDistance);
+        MONITOR_SERIAL.println(F(" cm"));
+      }
+      MONITOR_SERIAL.print(F("Overall distance: "));
+      MONITOR_SERIAL.print(overallDistance);
+      MONITOR_SERIAL.println(F(" cm"));
+    } else {
+      MONITOR_SERIAL.println(F("No target detected"));
+    }
+  }
+}
+
+void reconnectMQTT() {
+  while (mqtt.connected() == false) {
+    MONITOR_SERIAL.print("Connecting to MQTT... ");
+    if (mqtt.connect()) {
+      MONITOR_SERIAL.println("Connected!");
+    } else {
+      MONITOR_SERIAL.print("MQTT connection failed");
+      MONITOR_SERIAL.println(" Retrying in 5 seconds...");
+      delay(5000);
+    }
+  }
+}
