@@ -26,7 +26,6 @@ The radar sensor connects to the ESP32-C3 Mini as follows:
 | GND              | GND              |
 | Output Signal    | GPIO 4           |
 
-Ensure stable and secure connections to avoid interruptions in data collection.
 
 ---
 
