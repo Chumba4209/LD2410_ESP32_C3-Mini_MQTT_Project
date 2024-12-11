@@ -22,10 +22,11 @@ The radar sensor connects to the ESP32-C3 Mini as follows:
 
 | Radar Sensor Pin | ESP32-C3 GPIO Pin |
 |------------------|-------------------|
-| VCC              | 3.3V             |
-| GND              | GND              |
-| Output Signal    | GPIO 4           |
-
+| VCC              | VBUS              |
+| GND              | GND               |
+| Tx               | GPIO 4            |
+| Rx               | GPIO 5            |
+|
 
 ---
 
