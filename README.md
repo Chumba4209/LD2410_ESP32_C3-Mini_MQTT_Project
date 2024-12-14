@@ -30,16 +30,6 @@ The radar sensor connects to the ESP32-C3 Mini as follows:
 
 ---
 
-## Software Setup
-
-### Prerequisites:
-1. Install the Arduino IDE.
-2. Add the ESP32 board package to the Arduino IDE by including the following URL in the **Preferences > Additional Board Manager URLs**:
-   `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
-3. Install the following Arduino libraries:
-   - `Adafruit_MQTT` for MQTT communication.
-   - `WiFiManager` for the configuration portal.
-
 ### Code Overview:
 The code is divided into key sections:
 1. **Radar Data Processing**: Reads the radar sensor's output signal to determine distance, stationary or moving targets, and presence.
