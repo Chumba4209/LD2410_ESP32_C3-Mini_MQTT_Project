@@ -33,7 +33,7 @@ The radar sensor connects to the ESP32-C3 Mini as follows:
 ### Code Overview:
 The code is divided into key sections:
 1. **Radar Data Processing**: Reads the radar sensor's output signal to determine distance, stationary or moving targets, and presence.
-2. **MQTT Communication**: Publishes data to Adafruit IO using distinct feeds for distance, stationary target, moving target, and presence.
+2. **MQTT Communication**: Publishes data to Adafruit IO using distinct feeds for distance, stationary target, moving target, and presence. On AdafruitIO, create an account and create 4 feeds namely: distance, presence, movingTarget, stationaryTarget.
 3. **Configuration Portal**: Sets up a web interface to input WiFi credentials, Adafruit username, and API key.
 
 ---
